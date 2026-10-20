@@ -198,13 +198,26 @@ export function normalizeEventId(
   return `${contractId}:${ledger}:${txHash}:${eventIndex}`;
 }
 
-// Stub hook — replace with real logic as needed (e.g. metrics, alerting).
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function onBeforeInsert(_eventId: string): void { /* hook */ }
-
-// Stub hook — called after a successful insert (INSERT OR IGNORE may be a no-op).
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function onAfterInsert(_eventId: string): void { /* hook */ }
+/**
+ * Indexer event hooks for test fault injection and observability.
+ *
+ * Usage (tests only):
+ *   import { __indexerHooks } from './indexer';
+ *   __indexerHooks.beforeInsert = (eventId) => {
+ *     if (shouldSimulateFailure) throw new Error('simulated crash');
+ *   };
+ *
+ * These hooks are called around every event insert to enable:
+ * - Fault injection (e.g., crash between insert and side effects)
+ * - Idempotent reprocessing verification
+ * - Metrics / alerting (future)
+ *
+ * @internal Test-only API; do not use in production.
+ */
+export const __indexerHooks = {
+  beforeInsert: (_eventId: string) => {},
+  afterInsert: (_eventId: string) => {},
+};
 
 // ─── Indexer ──────────────────────────────────────────────────────────────────
 
@@ -333,7 +346,7 @@ export async function indexEvents(): Promise<void> {
     const createdAt = raw.ledgerClosedAt ? new Date(raw.ledgerClosedAt).getTime() : Date.now();
     const ledgerHash = raw.ledgerHash ?? raw.pagingToken ?? raw.txHash;
 
-    onBeforeInsert(eventId);
+    __indexerHooks.beforeInsert(eventId);
     const insertResult = insert.run(
       type,
       event.ledger,
@@ -347,7 +360,7 @@ export async function indexEvents(): Promise<void> {
     );
     const eventInserted = insertResult.changes > 0;
     if (!eventInserted) return;
-    onAfterInsert(eventId);
+    __indexerHooks.afterInsert(eventId);
 
     await withRestoredCorrelation(
       event.txHash,
